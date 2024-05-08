@@ -37,13 +37,13 @@ def draw_kdeplot(df: pd.DataFrame, x: str, ax, hue: str = "") -> None:
     ax.axvline(df[x].median(), color="green")
 
 
-def draw_distribution_plots(df: pd.DataFrame, use_hue: bool = True) -> None:
+def draw_distribution_plots(df: pd.DataFrame, use_hue: bool = True, figsize: tuple = (12,18)) -> None:
     """Draw distribution plots for Sales and Customers columns"""
 
     if use_hue:
-        fig, axs = plt.subplots(nrows=4, ncols=2, figsize=(12,18))
+        fig, axs = plt.subplots(nrows=4, ncols=2, figsize=figsize)
     else:
-        fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(12,18))
+        fig, axs = plt.subplots(nrows=3, ncols=2, figsize=figsize)
     fig.tight_layout(pad=5.0)
 
     # Create plots
@@ -112,7 +112,10 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
 
 
 def remove_outliers(df: pd.DataFrame) -> pd.DataFrame:
-    """_summary_
+    """
+    Remove outliers from the Sales and Customers columns
+
+    Ref: https://scikit-learn.org/stable/auto_examples/preprocessing/plot_all_scaling.html#compare-the-effect-of-different-scalers-on-data-with-outliers
 
     Args:
         df (pd.DataFrame): _description_
@@ -120,18 +123,31 @@ def remove_outliers(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: _description_
     """
-    X = df[['Customers', 'Sales']]
+    df_copy = df.copy()
+    X = df.copy()
 
     outlier_remover = QuantileTransformer(output_distribution="normal").fit_transform(X)
 
-    data_without_outliers = pd.DataFrame(outlier_remover, columns=X.columns)
+    data_without_outliers = pd.DataFrame(outlier_remover, columns=df_copy.columns, index=df_copy.index)
 
     outlier_remover = OutlierRemover()
 
-    ct = ColumnTransformer(transformers=[['outlier_remover', OutlierRemover(), list(range(data_without_outliers.shape[1]))]], remainder='passthrough')
+    ct = ColumnTransformer(
+        transformers=[[
+            "outlier_remover",
+            OutlierRemover(),
+            list(range(data_without_outliers.shape[1]))
+        ]], remainder="passthrough"
+    )
 
-    data_without_outliers = pd.DataFrame(ct.fit_transform(data_without_outliers), columns=data_without_outliers.columns)
+    data_without_outliers = pd.DataFrame(
+        ct.fit_transform(data_without_outliers),
+        columns=df_copy.columns,
+        index=df_copy.index
+    )
 
-    draw_distribution_plots(df=data_without_outliers, use_hue=False)
+    draw_distribution_plots(df=data_without_outliers, use_hue=False, figsize=(12, 16))
 
-    return data_without_outliers
+    combined_df = pd.concat([df_copy, data_without_outliers.add_suffix('_std')], axis=1)
+
+    return combined_df
