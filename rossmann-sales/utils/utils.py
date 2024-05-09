@@ -3,9 +3,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from sklearn.base import BaseEstimator,TransformerMixin
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import QuantileTransformer
+from scipy import stats
 
 
 
@@ -83,71 +81,48 @@ def draw_distribution_plots(df: pd.DataFrame, use_hue: bool = True, figsize: tup
         draw_kdeplot(df=df, x="Customers", ax=axs[3, 1], hue="DayOfWeek")
 
 
-class OutlierRemover(BaseEstimator, TransformerMixin):
-    def __init__(self, factor=1.5):
-        self.factor = factor
-        self.lower_bound = []
-        self.upper_bound = []
+class OutlierHandler:
+    def __init__(self, df: pd.DataFrame) -> None:
+        self.df_copy = df.copy()
 
-    def outlier_detector(self, X, y=None):
-        X = pd.Series(X).copy()
-        q1 = X.quantile(0.25)
-        q3 = X.quantile(0.75)
+    def generate_z_scores(self, column: str) -> pd.DataFrame:
+        self.df_copy[f"{column}_z_score"] = stats.zscore(self.df_copy[column])
+
+        return self.df_copy
+
+    def drop_z_score_outliers(self, column: str, threshold: int = 3) -> pd.DataFrame:
+        z_col = f"{column}_z_score"
+
+        outliers = self.df_copy[np.abs(self.df_copy[z_col]) > threshold]
+
+        return self.df_copy.drop(outliers.index)
+
+    def drop_outliers_using_iqr(self, column: str, threshold: float = 1.5):
+        q1 = self.df_copy[column].quantile(0.25)
+        q3 = self.df_copy[column].quantile(0.75)
         iqr = q3 - q1
 
-        self.lower_bound.append(q1 - (self.factor * iqr))
-        self.upper_bound.append(q3 + (self.factor * iqr))
+        outliers = self.df_copy[(self.df_copy[column] < q1 - threshold * iqr) | (self.df_copy[column] > q3 + threshold * iqr)]
 
-    def fit(self, X, y=None):
-        X.apply(self.outlier_detector)
-        return self
+        return self.df_copy.drop(outliers.index)
 
-    def transform(self, X, y=None):
-        X = pd.DataFrame(X).copy()
-        for i in range(X.shape[1]):
-            x = X.iloc[:, i].copy()
-            x[(x < self.lower_bound[i]) | (x > self.upper_bound[i])] = np.nan
-            X.iloc[:, i] = x
-        return X
+    def impute_z_score_outliers_with_median(self, column: str, threshold: int = 3):
+        z_col = f"{column}_z_score"
 
+        self.df_copy.loc[np.abs(self.df_copy[z_col]) > threshold, column] = self.df_copy[column].median()
 
-def remove_outliers(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove outliers from the Sales and Customers columns
+        return self.df_copy
 
-    Ref: https://scikit-learn.org/stable/auto_examples/preprocessing/plot_all_scaling.html#compare-the-effect-of-different-scalers-on-data-with-outliers
+    def remove_outliers(self, columns: tuple = ("Customers", "Sales")) -> pd.DataFrame:
+        for column in columns:
+            self.generate_z_scores(column=column)
 
-    Args:
-        df (pd.DataFrame): _description_
+        for column in columns:
+            self.df_copy = self.drop_z_score_outliers(column=column)
 
-    Returns:
-        pd.DataFrame: _description_
-    """
-    df_copy = df.copy()
-    X = df.copy()
+        for column in columns:
+            self.df_copy = self.drop_outliers_using_iqr(column=column)
 
-    outlier_remover = QuantileTransformer(output_distribution="normal").fit_transform(X)
+        draw_distribution_plots(df=self.df_copy)
 
-    data_without_outliers = pd.DataFrame(outlier_remover, columns=df_copy.columns, index=df_copy.index)
-
-    outlier_remover = OutlierRemover()
-
-    ct = ColumnTransformer(
-        transformers=[[
-            "outlier_remover",
-            OutlierRemover(),
-            list(range(data_without_outliers.shape[1]))
-        ]], remainder="passthrough"
-    )
-
-    data_without_outliers = pd.DataFrame(
-        ct.fit_transform(data_without_outliers),
-        columns=df_copy.columns,
-        index=df_copy.index
-    )
-
-    draw_distribution_plots(df=data_without_outliers, use_hue=False, figsize=(12, 16))
-
-    combined_df = pd.concat([df_copy, data_without_outliers.add_suffix('_std')], axis=1)
-
-    return combined_df
+        return self.df_copy
