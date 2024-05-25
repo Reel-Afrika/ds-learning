@@ -93,7 +93,9 @@ class OutlierHandler:
     def drop_z_score_outliers(self, column: str, threshold: int = 3) -> pd.DataFrame:
         z_col = f"{column}_z_score"
 
-        outliers = self.df_copy[np.abs(self.df_copy[z_col]) > threshold]
+        self.generate_z_scores(column=column)
+
+        outliers = self.df_copy[np.abs(self.df_copy[z_col]) >= threshold]
 
         return self.df_copy.drop(outliers.index)
 
@@ -114,12 +116,6 @@ class OutlierHandler:
         return self.df_copy
 
     def remove_outliers(self, columns: tuple = ("Customers", "Sales")) -> pd.DataFrame:
-        for column in columns:
-            self.generate_z_scores(column=column)
-
-        for column in columns:
-            self.df_copy = self.drop_z_score_outliers(column=column)
-
         for column in columns:
             self.df_copy = self.drop_outliers_using_iqr(column=column)
 
